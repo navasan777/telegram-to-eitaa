@@ -1,96 +1,65 @@
-from telethon import TelegramClient, events
 import requests
-import os
-import logging
-import time
+from telegram.ext import Updater, MessageHandler, Filters
 
 # --- تنظیمات ---
-api_id = 123456      # از my.telegram.org
-api_hash = "YOUR_API_HASH"
 telegram_bot_token = "YOUR_TELEGRAM_BOT_TOKEN"
-telegram_channel = "telegram_channel_username"  # بدون @
-
+telegram_channel = "@your_private_channel"   # کانال خصوصی تلگرام (ادمینش کن)
 eitaa_token = "YOUR_EITAA_BOT_TOKEN"
-eitaa_channel = "@your_eitaa_channel"
+eitaa_channel = "@your_eitaa_channel"        # کانال خصوصی ایتا (ادمینش کن)
 
-# --- لاگ‌گذاری ---
-logging.basicConfig(
-    filename="bot.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
-# --- کلاینت تلگرام ---
-client = TelegramClient('forwarder', api_id, api_hash).start(bot_token=telegram_bot_token)
-
-# --- ارسال متن به ایتا ---
-def send_text_to_eitaa(text):
-    url = f"https://eitaayar.ir/api/{eitaa_token}/sendMessage"
+# --- ارسال پیام به ایتا ---
+def send_to_eitaa(endpoint, data, files=None):
+    url = f"https://eitaayar.ir/api/{eitaa_token}/{endpoint}"
     try:
-        r = requests.post(url, json={"chat_id": eitaa_channel, "text": text}, timeout=20)
-        if r.status_code == 200:
-            logging.info("✅ متن ارسال شد.")
-        else:
-            logging.error(f"خطا در ارسال متن: {r.text}")
+        r = requests.post(url, data={"chat_id": eitaa_channel, **data}, files=files)
+        print("📤 پاسخ ایتا:", r.text)
     except Exception as e:
-        logging.error(f"❌ خطا در اتصال به ایتا: {e}")
+        print("❌ خطا در ارسال به ایتا:", e)
 
-# --- ارسال فایل (عکس/ویدیو/ویس/سند) به ایتا ---
-def send_file_to_eitaa(file_path, file_type):
-    try:
-        # بررسی سایز (محدودیت 50MB فرضی)
-        if os.path.getsize(file_path) > 50 * 1024 * 1024:
-            logging.warning(f"⚠️ فایل {file_path} خیلی بزرگه، ارسال نشد.")
-            return
+# --- وقتی پیام جدید در کانال تلگرام بیاد ---
+def forward_to_eitaa(update, context):
+    msg = update.channel_post
+    
+    # متن ساده
+    if msg.text:
+        send_to_eitaa("sendMessage", {"text": msg.text})
 
-        url = f"https://eitaayar.ir/api/{eitaa_token}/send{file_type.capitalize()}"
+    # عکس
+    elif msg.photo:
+        file = msg.photo[-1].get_file()
+        file_path = file.download()
         with open(file_path, 'rb') as f:
-            r = requests.post(url, data={"chat_id": eitaa_channel}, files={file_type: f}, timeout=60)
+            send_to_eitaa("sendPhoto", {"caption": msg.caption or ""}, {"photo": f})
 
-        if r.status_code == 200:
-            logging.info(f"✅ {file_type} ارسال شد.")
-        else:
-            logging.error(f"خطا در ارسال {file_type}: {r.text}")
+    # ویدیو
+    elif msg.video:
+        file = msg.video.get_file()
+        file_path = file.download()
+        with open(file_path, 'rb') as f:
+            send_to_eitaa("sendVideo", {"caption": msg.caption or ""}, {"video": f})
 
-    except Exception as e:
-        logging.error(f"❌ خطا در ارسال فایل: {e}")
-    finally:
-        try:
-            os.remove(file_path)  # پاکسازی
-        except:
-            pass
+    # ویس
+    elif msg.voice:
+        file = msg.voice.get_file()
+        file_path = file.download()
+        with open(file_path, 'rb') as f:
+            send_to_eitaa("sendVoice", {}, {"voice": f})
 
-# --- وقتی پست جدید در تلگرام بیاد ---
-@client.on(events.NewMessage(chats=telegram_channel))
-async def handler(event):
-    try:
-        message = event.message
+    # فایل (سند مثل PDF, ZIP...)
+    elif msg.document:
+        file = msg.document.get_file()
+        file_path = file.download()
+        with open(file_path, 'rb') as f:
+            send_to_eitaa("sendDocument", {"caption": msg.caption or ""}, {"document": f})
 
-        if message.text:  
-            send_text_to_eitaa(message.text)
+    else:
+        print("ℹ️ نوع پیام پشتیبانی نشده:", msg)
 
-        elif message.photo:  
-            file_path = await message.download_media()
-            send_file_to_eitaa(file_path, "photo")
+# --- اجرای ربات تلگرام ---
+updater = Updater(telegram_bot_token, use_context=True)
+dp = updater.dispatcher
+dp.add_handler(MessageHandler(Filters.chat(username=telegram_channel), forward_to_eitaa))
 
-        elif message.video:  
-            file_path = await message.download_media()
-            send_file_to_eitaa(file_path, "video")
-
-        elif message.voice:  
-            file_path = await message.download_media()
-            send_file_to_eitaa(file_path, "voice")
-
-        elif message.document:  
-            file_path = await message.download_media()
-            send_file_to_eitaa(file_path, "document")
-
-        else:
-            logging.info(f"پیام پشتیبانی نشده: {message.id}")
-
-    except Exception as e:
-        logging.error(f"❌ خطای ناشناخته در handler: {e}")
-        time.sleep(5)  # جلوگیری از اسپم شدن خطا
-
-print("🚀 ربات روشن است...")
-client.run_until_disconnected()
+print("🚀 ربات آماده است و داره پیام‌ها رو از تلگرام به ایتا می‌فرسته...")
+updater.start_polling()
+updater.idle()
