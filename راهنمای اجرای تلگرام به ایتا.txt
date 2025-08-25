@@ -1,0 +1,229 @@
+خیلی عالی 👌
+بریم مرحله‌به‌مرحله مثل یه نقشه راه کامل ✨
+(جوری توضیح می‌دم که حتی اگه اولین بار باشه بتونی انجام بدی).
+
+---
+
+# 🚀 صفر تا صد اجرای ربات انتقال تلگرام ➝ ایتا روی Debian 12
+
+## 🔹 مرحله ۱: ساخت ربات تلگرام
+
+1. برو داخل تلگرام و سرچ کن: `@BotFather`
+
+2. دستور `/newbot` رو بزن
+
+3. یه اسم بده (مثلاً: `MyForwardBot`)
+
+4. یه یوزرنیم بده که به `_bot` ختم بشه (مثلاً: `MyForwardChannelBot`)
+
+5. آخرش BotFather بهت یه **توکن (Token)** می‌ده مثل این:
+
+   ```
+   123456789:ABCDEF...xyz
+   ```
+
+   ✅ این توکن رو ذخیره کن (لازم داریم).
+
+6. برو داخل کانال خصوصی تلگرامت
+
+   * رباتت رو **به عنوان ادمین اضافه کن**
+   * دسترسی بده: "Post Messages" و "Read Messages".
+
+---
+
+## 🔹 مرحله ۲: ساخت ربات ایتا
+
+1. وارد ایتا شو
+
+2. برو به بخش ساخت ربات (مثل تلگرام BotFather داره به اسم `EitaaBotFather` یا از طریق [eitaayar.ir](https://eitaayar.ir))
+
+3. دستور `/newbot` رو بزن
+
+4. اسم و یوزرنیم بده
+
+5. یه **توکن (Token)** بهت می‌ده (شبیه تلگرام)
+   مثل:
+
+   ```
+   654321:XYZ...abc
+   ```
+
+   ✅ اینم ذخیره کن.
+
+6. برو داخل کانال خصوصی ایتا
+
+   * رباتت رو **ادمین کن**
+   * دسترسی بده برای ارسال پیام.
+
+---
+
+## 🔹 مرحله ۳: آماده‌سازی سرور (Debian 12)
+
+روی سرورت (SSH با root یا sudo) دستورات زیر رو بزن:
+
+```bash
+# آپدیت سیستم
+sudo apt update && sudo apt upgrade -y
+
+# نصب پایتون و pip
+sudo apt install python3 python3-pip -y
+
+# نصب کتابخانه‌های لازم
+pip3 install python-telegram-bot==13.15 requests
+```
+
+---
+
+## 🔹 مرحله ۴: ساخت فایل ربات
+
+1. یه پوشه برای ربات بساز:
+
+```bash
+mkdir ~/telegram-to-eitaa
+cd ~/telegram-to-eitaa
+```
+
+2. یه فایل به اسم `bot.py` بساز:
+
+```bash
+nano bot.py
+```
+
+3. این کد رو کامل داخلش کپی کن 👇 (توکن‌ها و کانال‌ها رو عوض کن):
+
+```python
+import requests
+from telegram.ext import Updater, MessageHandler, Filters
+
+# --- تنظیمات ---
+telegram_bot_token = "توکن_ربات_تلگرام"
+telegram_channel = "@یوزرنیم_کانال_تلگرام"   # کانال خصوصی (ربات ادمینش کن)
+eitaa_token = "توکن_ربات_ایتا"
+eitaa_channel = "@یوزرنیم_کانال_ایتا"        # کانال خصوصی (ربات ادمینش کن)
+
+# --- ارسال پیام به ایتا ---
+def send_to_eitaa(endpoint, data, files=None):
+    url = f"https://eitaayar.ir/api/{eitaa_token}/{endpoint}"
+    try:
+        r = requests.post(url, data={"chat_id": eitaa_channel, **data}, files=files)
+        print("📤 پاسخ ایتا:", r.text)
+    except Exception as e:
+        print("❌ خطا در ارسال به ایتا:", e)
+
+# --- وقتی پیام جدید در کانال تلگرام بیاد ---
+def forward_to_eitaa(update, context):
+    msg = update.channel_post
+    
+    # متن ساده
+    if msg.text:
+        send_to_eitaa("sendMessage", {"text": msg.text})
+
+    # عکس
+    elif msg.photo:
+        file = msg.photo[-1].get_file()
+        file_path = file.download()
+        with open(file_path, 'rb') as f:
+            send_to_eitaa("sendPhoto", {"caption": msg.caption or ""}, {"photo": f})
+
+    # ویدیو
+    elif msg.video:
+        file = msg.video.get_file()
+        file_path = file.download()
+        with open(file_path, 'rb') as f:
+            send_to_eitaa("sendVideo", {"caption": msg.caption or ""}, {"video": f})
+
+    # ویس
+    elif msg.voice:
+        file = msg.voice.get_file()
+        file_path = file.download()
+        with open(file_path, 'rb') as f:
+            send_to_eitaa("sendVoice", {}, {"voice": f})
+
+    # فایل (سند مثل PDF, ZIP...)
+    elif msg.document:
+        file = msg.document.get_file()
+        file_path = file.download()
+        with open(file_path, 'rb') as f:
+            send_to_eitaa("sendDocument", {"caption": msg.caption or ""}, {"document": f})
+
+    else:
+        print("ℹ️ نوع پیام پشتیبانی نشده:", msg)
+
+# --- اجرای ربات تلگرام ---
+updater = Updater(telegram_bot_token, use_context=True)
+dp = updater.dispatcher
+dp.add_handler(MessageHandler(Filters.chat(username=telegram_channel), forward_to_eitaa))
+
+print("🚀 ربات آماده است و داره پیام‌ها رو از تلگرام به ایتا می‌فرسته...")
+updater.start_polling()
+updater.idle()
+```
+
+4. فایل رو ذخیره کن (Ctrl+O, Enter, Ctrl+X).
+
+---
+
+## 🔹 مرحله ۵: اجرای تستی ربات
+
+برای تست کردن:
+
+```bash
+python3 bot.py
+```
+
+حالا هر پیام، عکس، ویدیو یا فایل که توی **کانال تلگرام** بزنی باید بیاد توی **کانال ایتا** ✅
+
+---
+
+## 🔹 مرحله ۶: اجرای دائمی (systemd)
+
+1. یه فایل سرویس بساز:
+
+```bash
+sudo nano /etc/systemd/system/tg2eitaa.service
+```
+
+2. اینو توش بذار (مسیر رو درست بزن):
+
+```ini
+[Unit]
+Description=Telegram to Eitaa Forward Bot
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/telegram-to-eitaa
+ExecStart=/usr/bin/python3 /root/telegram-to-eitaa/bot.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+3. ذخیره کن و بزن:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable tg2eitaa
+sudo systemctl start tg2eitaa
+```
+
+4. وضعیت رو ببین:
+
+```bash
+sudo systemctl status tg2eitaa
+```
+
+---
+
+## ✅ نتیجه
+
+الان رباتت همیشه روشن می‌مونه، بعد از ریبوت هم خودش بالا میاد و هر چیزی توی کانال تلگرام بزنی → میره به کانال ایتا.
+
+---
+
+می‌خوای من برات همین نسخه رو یکم **پیشرفته‌تر کنم** که:
+
+* استیکرها رو هم منتقل کنه
+* خطاها رو لاگ کنه توی فایل
+* اگه سرور ایتا یا تلگرام کند شد، خودش دوباره امتحان کنه؟
